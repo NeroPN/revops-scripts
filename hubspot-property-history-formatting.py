@@ -45,7 +45,7 @@ def pad_and_transform_csv(input_file, intermediate_output_file, final_output_fil
 
 
 # File paths for the input, intermediate, and output CSV files
-input_file = 'path/history.csv'  # Replace with your input CSV file path
+input_file = 'history.csv'  # Replace with your input CSV file path
 intermediate_output_file = 'padded.csv'  # Intermediate file path
 final_output_file = 'output.csv'  # Final output file path
 start_col = 1  # Replace with the column index where the current value is (starts at 0)

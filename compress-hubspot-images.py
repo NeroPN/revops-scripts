@@ -14,6 +14,7 @@ import time
 BEARER_TOKEN = 'YOUR_TOKEN_HERE'
 MIN_FILE_SIZE_FOR_COMPRESSION = 800000  # Minimum size the image should have to be compressed in bytes (800kb)
 SLEEP_TIMER = 1  # Time in seconds to wait between image request & compressions
+JPG_QUALITY = 80  # Quality for JPEG compression
 
 # File and directory paths (created automatically in the folder where this is running)
 IMAGES_JSON_PATH = 'images.json'
@@ -26,7 +27,7 @@ def fetch_images():
     all_images = []
     offset = 0
     limit = 500
-    jpg_quality = 75
+
 
     while True:
         params = {'type': 'IMG', 'limit': limit, 'offset': offset}
@@ -61,7 +62,12 @@ def compress_images(image_list):
                             img = img.convert('RGB')
 
                         compressed_path = os.path.join(COMPRESSED_IMAGES_DIR, f"{img_info['id']}.{original_extension}")
-                        img.save(compressed_path, original_extension.upper(), optimize=True)
+
+                        # Apply JPEG quality settings if the image is a JPEG
+                        if original_extension == 'jpeg':
+                            img.save(compressed_path, original_extension.upper(), quality=JPG_QUALITY, optimize=True)
+                        else:
+                            img.save(compressed_path, original_extension.upper(), optimize=True)
 
                         compressed_images_log.append({'id': img_info['id'], 'path': compressed_path})
                         print(f"Compressed and saved image {img_info['id']}")

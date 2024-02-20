@@ -1,7 +1,7 @@
 
   // Configurable portal ID and form ID
-  var portalID = '14550686';
-  var formID = '20fc0e9e-a4c0-4aa5-9ccb-3d927fcd5d54';
+  var portalID = 'HUBSPOT-ID';
+  var formID = 'HUBSPOT-FORM-ID';
 
   window.addEventListener('message', function (event) {
     if (event.data.meetingBookSucceeded) {

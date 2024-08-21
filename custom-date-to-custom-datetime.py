@@ -48,6 +48,7 @@ import sys
 import requests
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 from datetime import datetime
 import concurrent.futures
@@ -56,14 +57,10 @@ import concurrent.futures
 def install_packages(packages):
     for package in packages:
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# List of required packages
 required_packages = ['requests']
-
-# Install the required packages
 install_packages(required_packages)
 
-# Configure logging to file
+# Config logs
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -73,25 +70,24 @@ logging.basicConfig(
     ]
 )
 
-# ======================= USER CONFIGURATION =======================
+# ======================= USER CONFIG =======================
 
 # HubSpot API Key - Replace this with your actual API key
-HUBSPOT_API_KEY = 'YOUR PRIVATE APP KEY'
+HUBSPOT_API_KEY = 'YOUR KEY'
 
 # Custom date properties per HubSpot object type
 custom_date_fields = {
-    "contacts": ["date_test", "another_date_field"],  # Update these fields as needed
-    "companies": ["another_date_field"],  # Update these fields as needed
-    "deals": ["another_date_field"]  # Update these fields as needed
+    "contacts": ["custom_date1", "custom_date2"],  # Update these fields as needed
+    "companies": ["custom_date1"],  # Update these fields as needed
+    "deals": ["custom_date1"]  # Update these fields as needed
 }
 
 # ==================================================================
 
-# Base URL for HubSpot API
+
 BASE_URL = 'https://api.hubapi.com'
 
 def get_group_name(object_type):
-    logging.debug(f"get_group_name called with object_type: {object_type}")
     if object_type == "contacts":
         return "contactinformation"
     elif object_type == "companies":
@@ -102,18 +98,15 @@ def get_group_name(object_type):
         raise ValueError(f"Unknown object type: {object_type}")
 
 def property_exists(object_type, datetime_field_name):
-    logging.debug(f"property_exists called with object_type: {object_type}, datetime_field_name: {datetime_field_name}")
     url = f"{BASE_URL}/crm/v3/properties/{object_type}/{datetime_field_name}"
     headers = {
         'Authorization': f'Bearer {HUBSPOT_API_KEY}',
         'Content-Type': 'application/json'
     }
     response = requests.get(url, headers=headers)
-    logging.info(f"Property check response for {datetime_field_name}: {response.status_code}, {response.json()}")
     return response.status_code == 200
 
 def create_datetime_property(object_type, date_field):
-    logging.debug(f"create_datetime_property called with object_type: {object_type}, date_field: {date_field}")
     datetime_field_name = f"{date_field}_datetime"
     
     if property_exists(object_type, datetime_field_name):
@@ -137,31 +130,29 @@ def create_datetime_property(object_type, date_field):
         "formField": True
     }
 
-    logging.debug(f"Creating property with payload: {payload}")
     response = requests.post(url, json=payload, headers=headers)
-    logging.info(f"Create property response for {datetime_field_name}: {response.status_code}, {response.json()}")
     
     if response.status_code == 201:
         logging.info(f"Created datetime property: {datetime_field_label} for {object_type}")
     else:
         logging.error(f"Failed to create datetime property for {object_type}: {response.status_code}, {response.json()}")
 
-def fetch_property_history(object_type, object_id, property_name):
-    logging.debug(f"fetch_property_history called with object_type: {object_type}, object_id: {object_id}, property_name: {property_name}")
-    url = f'{BASE_URL}/crm/v3/objects/{object_type}/{object_id}'
+def fetch_objects_batch(object_type, date_fields, after=None):
+    url = f'{BASE_URL}/crm/v3/objects/{object_type}'
     headers = {
         'Authorization': f'Bearer {HUBSPOT_API_KEY}',
         'Content-Type': 'application/json'
     }
     params = {
-        'propertiesWithHistory': property_name
+        'limit': 50, 
+        'propertiesWithHistory': ','.join(date_fields),
     }
+    if after:
+        params['after'] = after
 
     retries = 0
     while True:
-        logging.info(f"Fetching property history for {object_type} ID {object_id} and property {property_name}...")
         response = requests.get(url, headers=headers, params=params)
-        logging.info(f"Fetch property history response for {object_id}: {response.status_code}, {response.json()}")
         if response.status_code == 429:
             retry_after = int(response.headers.get("Retry-After", 1))
             retries += 1
@@ -170,26 +161,17 @@ def fetch_property_history(object_type, object_id, property_name):
             time.sleep(wait_time)
         else:
             if response.status_code == 200:
-                data = response.json()
-                history = data.get('propertiesWithHistory', {}).get(property_name, [])
-                if history:
-                    logging.info(f"Property history retrieved for {object_type} ID {object_id}. History: {history}")
-                    return determine_timestamp_format(history)
-                else:
-                    logging.warning(f"No history found for {object_type} ID {object_id} and property {property_name}.")
-                    return None
+                return response.json()
             else:
-                logging.error(f"Failed to fetch property history for {object_type} ID {object_id}. Status: {response.status_code}. Response: {response.json()}")
+                logging.error(f"Failed to fetch {object_type} batch. Status: {response.status_code}. Response: {response.json()}")
                 return None
 
 def determine_timestamp_format(history):
-    logging.debug(f"determine_timestamp_format called with history: {history}")
     if not history:
         return None
 
     latest_entry = history[0]
     latest_value = latest_entry['value']
-
     latest_change = None
     for version in history:
         if 'timestamp' in version:
@@ -201,114 +183,109 @@ def determine_timestamp_format(history):
         if latest_change:
             change_date = datetime.fromisoformat(latest_change.replace('Z', '+00:00')).date()
             if change_date == value_date:
-                logging.info(f"Matching timestamp found for value date {value_date}: {latest_change}")
                 return latest_change
         fallback_timestamp = latest_value + "T06:00:00.000Z"
-        logging.info(f"No matching timestamp found. Using fallback timestamp: {fallback_timestamp}")
         return fallback_timestamp
     except ValueError as e:
         logging.error(f"Error parsing date {latest_value}: {e}")
         return latest_value
 
 def convert_to_unix_timestamp(timestamp):
-    logging.debug(f"convert_to_unix_timestamp called with timestamp: {timestamp}")
     try:
         dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-        unix_timestamp = int(dt.timestamp() * 1000)
-        logging.info(f"Converted timestamp {timestamp} to Unix timestamp: {unix_timestamp}")
-        return unix_timestamp
+        return int(dt.timestamp() * 1000)
     except ValueError as e:
         logging.error(f"Error converting timestamp: {timestamp}. Error: {e}")
         return None
 
-def update_datetime_property(object_type, object_id, datetime_field_name, datetime_value):
-    logging.debug(f"update_datetime_property called with object_type: {object_type}, object_id: {object_id}, datetime_field_name: {datetime_field_name}, datetime_value: {datetime_value}")
-    unix_timestamp = convert_to_unix_timestamp(datetime_value)
-    if not unix_timestamp:
-        logging.error(f"Invalid timestamp for {object_type} ID {object_id}: {datetime_value}. Skipping update.")
+def batch_update_records(object_type, batch_payload):
+    if not batch_payload:
+        logging.warning(f"No valid updates to send for {object_type}. Skipping batch update.")
         return
+    
+    logging.debug(f"Preparing to update {len(batch_payload)} records for {object_type}. Payload: {batch_payload}")
 
-    url = f"{BASE_URL}/crm/v3/objects/{object_type}/{object_id}"
+    url = f"{BASE_URL}/crm/v3/objects/{object_type}/batch/update"
     headers = {
         'Authorization': f'Bearer {HUBSPOT_API_KEY}',
         'Content-Type': 'application/json'
     }
-    payload = {
-        "properties": {
-            datetime_field_name: unix_timestamp
-        }
-    }
-
-    logging.info(f"Updating {object_type} ID {object_id} with {datetime_field_name}: {unix_timestamp}")
-    response = requests.patch(url, json=payload, headers=headers)
-    logging.info(f"Update property response for {object_id}: {response.status_code}, {response.json()}")
-
+    payload = {"inputs": batch_payload}
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
     if response.status_code == 200:
-        logging.info(f"Successfully updated {object_type} ID {object_id} with {datetime_field_name}.")
+        logging.info(f"Batch update for {object_type} successful.")
     else:
-        logging.error(f"Failed to update {object_type} ID {object_id} with {datetime_field_name}. Status: {response.status_code}")
+        logging.error(f"Batch update for {object_type} failed: {response.status_code}, {response.json()}")
 
 def process_objects():
     logging.info("Starting process to create datetime properties and backfill data.")
+    
     for object_type, date_fields in custom_date_fields.items():
+        if not date_fields:
+            logging.info(f"No custom date fields specified for {object_type}. Skipping.")
+            continue
+
         for date_field in date_fields:
-            logging.debug(f"Creating datetime property for object_type: {object_type}, date_field: {date_field}")
             create_datetime_property(object_type, date_field)
 
     logging.info("Starting process to fetch and update objects with datetime properties.")
+    
     for object_type, date_fields in custom_date_fields.items():
+        if not date_fields:
+            logging.info(f"No custom date fields specified for {object_type}. Skipping.")
+            continue
+
         after = None
         has_more = True
 
         while has_more:
-            objects_url = f"{BASE_URL}/crm/v3/objects/{object_type}"
-            headers = {
-                'Authorization': f'Bearer {HUBSPOT_API_KEY}',
-                'Content-Type': 'application/json'
-            }
-            params = {
-                'limit': 50,
-                'propertiesWithHistory': ','.join(date_fields)
-            }
-            if after:
-                params['after'] = after
-
-            logging.info(f"Fetching {object_type} objects with {date_fields} history...")
-            response = requests.get(objects_url, headers=headers, params=params)
-            logging.info(f"Fetch objects response: {response.status_code}, {response.json()}")
-
-            if response.status_code != 200:
-                logging.error(f"Failed to fetch {object_type}. Status: {response.status_code}")
+            logging.info(f"Fetching {object_type} objects batch starting after: {after}")
+            response_data = fetch_objects_batch(object_type, date_fields, after)
+            
+            if not response_data or 'results' not in response_data:
+                logging.info(f"No {object_type} objects fetched.")
                 break
 
-            objects = response.json().get('results', [])
+            objects = response_data['results']
             logging.info(f"Fetched {len(objects)} {object_type} objects.")
+            logging.debug(f"Fetched {object_type} objects data: {objects}") 
 
+            batch_payload = []
             for obj in objects:
                 object_id = obj['id']
-                properties = obj.get('properties', {})
-                properties_with_history = obj.get('propertiesWithHistory', {})
-
                 for date_field in date_fields:
-                    logging.debug(f"Processing {object_type} ID {object_id} for property {date_field}")
-                    if date_field in properties_with_history:
-                        last_change_timestamp = fetch_property_history(object_type, object_id, date_field)
-                        if last_change_timestamp:
-                            datetime_field_name = f"{date_field}_datetime"
-                            logging.info(f"Updating {datetime_field_name} for {object_type} ID {object_id} with timestamp {last_change_timestamp}...")
-                            update_datetime_property(object_type, object_id, datetime_field_name, last_change_timestamp)
+                    history = obj.get('propertiesWithHistory', {}).get(date_field, [])
+                    logging.debug(f"History for {object_type} ID {object_id}, field {date_field}: {history}")  
+                    
+                    last_change_timestamp = determine_timestamp_format(history)
+                    if last_change_timestamp:
+                        datetime_field_name = f"{date_field}_datetime"
+                        timestamp_value = convert_to_unix_timestamp(last_change_timestamp)
+                        
+                        if timestamp_value:
+                            existing_object = next((item for item in batch_payload if item["id"] == object_id), None)
+                            if existing_object:
+                                existing_object["properties"][datetime_field_name] = timestamp_value
+                            else:
+                                batch_payload.append({
+                                    "id": object_id,
+                                    "properties": {datetime_field_name: timestamp_value}
+                                })
                         else:
-                            logging.warning(f"No valid timestamp found for {object_type} ID {object_id} on property {date_field}. Skipping update.")
+                            logging.warning(f"Skipping update for {object_id}: {datetime_field_name} has a null or invalid value.")
 
-            # Check if there's more data to fetch
-            paging = response.json().get('paging', {})
+            if batch_payload:
+                logging.debug(f"Prepared payload for {object_type} update: {batch_payload}")  
+                batch_update_records(object_type, batch_payload)
+            else:
+                logging.info(f"No valid updates to process for {object_type} in this batch.")
+
+            paging = response_data.get('paging', {})
             has_more = 'next' in paging and 'after' in paging['next']
             after = paging['next']['after'] if has_more else None
 
-            if has_more:
-                logging.info(f"More {object_type} objects to fetch. Continuing to next page.")
-            else:
-                logging.info(f"All {object_type} objects fetched and processed.")
 
 if __name__ == "__main__":
     process_objects()

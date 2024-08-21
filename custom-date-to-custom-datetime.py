@@ -8,6 +8,7 @@ from the history of the corresponding date properties.
 
 Requirements:
 - Python 3.x
+- requests library
 - HubSpot API Key
 
 Setup Instructions:
@@ -17,23 +18,26 @@ Setup Instructions:
 Configuration:
 1. Replace 'YOUR_HUBSPOT_API_KEY' with your actual HubSpot private APP API key.
     Your private app needs at least the following scopes:
-        - crm.objects.companies.read
-        - crm.objects.deals.read
-        - crm.objects.contacts.read
-        - crm.schemas.contacts.read
-        - crm.schemas.companies.read
-        - crm.schemas.deals.read
+    - crm.objects.companies.read
+    - crm.objects.deals.read
+    - crm.objects.contacts.read
+    - crm.schemas.contacts.read
+    - crm.schemas.companies.read
+    - crm.schemas.deals.read
 
 2. Update the `custom_date_fields` dictionary with your custom date properties for each HubSpot object type.
    - "contacts": List of custom date properties for contacts (e.g., "date_of_birth", "last_purchase_date").
    - "companies": List of custom date properties for companies (e.g., "foundation_date", "last_funding_date").
    - "deals": List of custom date properties for deals (e.g., "close_date", "contract_signed_date").
 
-3. Run the script from your terminal or command prompt:
+3. Ensure Python and the `requests` library are installed on your system. This is required for the script to communicate with the HubSpot API. If Python is not installed, you can download it from the official website. To install the `requests` library, open a terminal and run:
+   pip install requests
+
+   
+4. Run the script from your terminal or command prompt:
    python your_script_name.py
 
 The script will automatically:
-- Install required packages if not already installed.
 - Create new datetime properties in HubSpot based on the provided custom date fields.
 - Backfill the datetime properties with the last value change timestamp from the property history.
 
@@ -45,20 +49,13 @@ and backfill it with the timestamp of the last change to "close_date".
 
 import subprocess
 import sys
-import requests
 import logging
+import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 from datetime import datetime
 import concurrent.futures
-
-# Install required packages if not already installed
-def install_packages(packages):
-    for package in packages:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-required_packages = ['requests']
-install_packages(required_packages)
 
 # Config logs
 logging.basicConfig(
@@ -69,6 +66,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
+
 
 # ======================= USER CONFIG =======================
 

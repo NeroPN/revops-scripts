@@ -35,7 +35,7 @@ RETRY_BACKOFF = 2
 ENGAGEMENT_TYPES = ['calls', 'meetings', 'emails']  
 
 # === Authentication Configuration ===
-ACCESS_TOKEN = os.getenv('RevOps_KEY')  
+ACCESS_TOKEN = os.getenv('ACCESS_TOKEN')  
 if not ACCESS_TOKEN:
     raise Exception('Access token is not set correctly. Please ensure the "Workflows" environment variable is configured.')
 

@@ -42,31 +42,69 @@ logger = logging.getLogger()
 SCRAPER_API_KEY = 'abc'          # Replace with your ScraperAPI key
 VALUESERP_API_KEY = 'abc'     # Replace with your ValueSerp API key
 OPENAI_API_KEY = 'abc'  # Replace with your OpenAI API key
-SLACK_BOT_TOKEN = 'abc'  # Replace with your Slack Bot Token
+SLACK_BOT_TOKEN = 'abce'  # Replace with your Slack Bot Token
 SLACK_CHANNEL_NAME = 'abc'   # Replace with your Slack channel name
-GOOGLE_SERVICE_ACCOUNT_JSON = 'abc.json'  # Replace with your Google Service Account JSON path
+GOOGLE_SERVICE_ACCOUNT_JSON = 'path_to_your_google_service_account_json.json'  # Replace with your Google Service Account JSON path
 
+system_prompt = """
+You are a **Senior Creative Strategy and Go-To-Market Research Assistant** at **YOYABA.com**, a leading **B2B SaaS Marketing Agency**. Your primary responsibility is to provide **deep and strategic insights** for Go-To-Market (GTM) initiatives and creative strategies based on comprehensive research data.
+
+**Your Role includes:**
+- **Provide Deep Strategic Insights:** Analyze the provided data to uncover strategic opportunities and actionable recommendations.
+- **Produce Detailed Analyses:** Generate thorough, multi-paragraph reports that delve into specific data points, trends, and examples.
+- **Connect Product Features to Market Trends:** Link the client's product functionalities to broader market dynamics and buyer behaviors.
+- **Think Like a Senior Strategist:** Ensure that your analyses reflect a high level of strategic thinking, akin to that of a seasoned strategist.
+
+Your task is to create a extensive document for all creative strategy and gotomarket consulting work. This should be an extensive and detialed document with a good structure.
+"""
 
 # Sample payload data (dummy input)
 payload = {
-    'your_yoyaba_email': 'pn@yoyaba.com',
-    'slack_channel_to_notify': 'internal_clockodo',
+    'your_yoyaba_email': 'abc@yoyaba.com',
+    'slack_channel_to_notify': 'internal_tidely',
     'google_drive_folder_link': 'https://drive.google.com/drive/u/0/folders/1Yz7P3MCDEetUpP90UFecqJgiuuhxo93G',
-    'client_product_type_description': 'Zeiterfassungssoftware',
-    'client_name': 'Clockodo',  # Dynamic client name
-    'client_website_url': 'clockodo.com',
+    'client_product_type_description': 'Liquiditaetsmanagement',
+    'client_name': 'Tidely',  # Dynamic client name
+    'client_website_url': 'tidely.com',
     'client_linkedin_ad_library_id': '',
-    'client_omr_review_page': 'https://omr.com/en/reviews/product/clockodo/all',
-    'client_capterra_review_page': 'https://www.capterra.com.de/reviews/178143/clockodo',
-    'competitor_websites': ['zep.de'],
+    'client_omr_review_page': 'https://omr.com/de/reviews/product/tidely/all',
+    'client_capterra_review_page': 'https://www.capterra.com.de/reviews/1040845/tidely',
+    'competitor_websites': ['agicap.com','commitly.com'],
     'competitor_linkedin_ad_library_ids': [],
-    'competitor_omr_review_pages': ['https://omr.com/en/reviews/product/zep/all'],
+    'competitor_omr_review_pages': [''],
     'competitor_capterra_review_pages': []
 }
 
 # ========================
 # Helper Functions
 # ========================
+
+extra_params = {
+    'ultra_premium': 'true',
+    'render': 'true',
+    'premium': 'true',
+    'country_code': 'eu',
+    'render_timeout': 50000
+}
+
+def summarize_content_and_save(content, content_type, save_path, logger_instance=None):
+    """
+    Summarizes the given content and saves the summary to the specified path.
+
+    Parameters:
+        content (str): The content to summarize.
+        content_type (str): The type of content (e.g., 'news_article', 'omr_reviews', 'capterra_reviews', 'homepage', etc.)
+        save_path (str): The file path to save the summary.
+        logger_instance (logging.Logger): Logger instance for this function.
+
+    Returns:
+        str: The summary of the content.
+    """
+    summary = summarize_content(content, content_type, logger_instance)
+    if summary:
+        save_html_to_file(summary, os.path.dirname(save_path), os.path.basename(save_path))
+    return summary
+
 
 def num_tokens_from_messages(messages, model="gpt-4o"):
     """Returns the number of tokens used by a list of messages."""
@@ -121,19 +159,14 @@ def create_session_with_retries():
     session.mount('http://', adapter)
     return session
 
-def scrape_with_scraperapi(url, extra_params=None, session=None):
-    session = create_session_with_retries()
+def scrape_with_scraperapi(url, extra_params=extra_params, session=None):
     """
     Scrapes a given URL using ScraperAPI and returns the raw HTML content.
     Handles basic error logging.
-
-    Parameters:
-        url (str): The URL to scrape.
-        extra_params (dict, optional): Additional parameters for ScraperAPI.
-
-    Returns:
-        str or None: Raw HTML content if successful, else None.
     """
+    if not session:
+        session = create_session_with_retries()
+
     logger.info(f"Scraping URL: {url}")
     print(f"Scraping URL: {url}")  # Debug print statement
     api_url = 'https://api.scraperapi.com/'
@@ -161,6 +194,7 @@ def scrape_with_scraperapi(url, extra_params=None, session=None):
         logger.error(f"RequestException while scraping URL {url}: {e}")
         print(f"RequestException while scraping URL {url}: {e}")  # Debug print statement
         return None
+
 
 def perform_google_search_multiple_results(query, top_n=3, location='Germany'):
     """
@@ -403,12 +437,13 @@ def get_summary_from_openai(prompt, logger_instance=None):
         logger_instance = logger
 
     try:
-        response = client.chat.completions.create(model="gpt-4o", 
+        response = client.chat.completions.create(model="o1-mini", 
         messages=[
             {"role": "user", "content": prompt}
         ],
-        max_tokens=16384,
-        temperature=0.5)
+        max_completion_tokens=16000,
+        #temperature=0.4
+        )
         assistant_response = response.choices[0].message.content
         return assistant_response.strip()
     except openai.OpenAIError as e:
@@ -427,9 +462,21 @@ def prepare_openai_prompt(aggregated_data, payload):
     Returns:
         str: The prepared prompt.
     """
+
     # Initialize prompt components with company and setting context
     prompt = f"""
-You are a Creative Strategy Research Assistant at YOYABA.com, a B2B SaaS Marketing Agency specializing in crafting positioning and messaging for our clients. You are tasked with analyzing the following summarized data to provide strategic insights for our client, **{payload.get('client_name', 'the client')}**, a company offering **{payload.get('client_product_type_description', 'their product')}**.
+
+    You are a **Senior Creative Strategy and Go-To-Market Research Assistant** at **YOYABA.com**, a leading **B2B SaaS Marketing Agency**. Your primary responsibility is to provide **deep and strategic insights** for Go-To-Market (GTM) initiatives and creative strategies based on comprehensive research data.
+
+**Your Role includes:**
+- **Provide Deep Strategic Insights:** Analyze the provided data to uncover strategic opportunities and actionable recommendations.
+- **Produce Detailed Analyses:** Generate thorough, multi-paragraph reports that delve into specific data points, trends, and examples.
+- **Connect Product Features to Market Trends:** Link the client's product functionalities to broader market dynamics and buyer behaviors.
+- **Think Like a Senior Strategist:** Ensure that your analyses reflect a high level of strategic thinking, akin to that of a seasoned strategist.
+
+Your task is to create a extensive foundation for all creative strategy and gotomarket consulting work. This should be an extensive and detialed document with a good structure.
+
+You are a Creative Strategy and GoToMarket Research Assistant at YOYABA.com, a B2B SaaS Marketing Agency specializing in crafting positioning and messaging for our clients. You are tasked with analyzing the following summarized data to provide strategic insights for our client, **{payload.get('client_name', 'the client')}**, a company offering **{payload.get('client_product_type_description', 'their product')}**.
 
 **Research Context:**
 - **Client Name:** {payload.get('client_name', 'N/A')}
@@ -472,9 +519,20 @@ You are a Creative Strategy Research Assistant at YOYABA.com, a B2B SaaS Marketi
         if summary:
             prompt += f"**News Article {idx} Summary:**\n{summary}\n\n"
 
+    # Add Competitor Summaries
+    competitors = aggregated_data.get('competitors', [])
+    if competitors:
+        prompt += "\n**Competitor Summaries:**\n"
+        for i, comp in enumerate(competitors, start=1):
+            homepage = comp.get('homepage', {})
+            # If we have a summarized homepage for the competitor, use that. Otherwise, fall back to raw HTML
+            competitor_content = homepage.get('summary', homepage.get('html', ''))
+            if competitor_content:
+                prompt += f"**Competitor {i} Homepage Summary:**\n{competitor_content}\n\n"
+
     # Include the strategic questions
     prompt += """
-**Strategic Questions:**
+**Example Strategic Questions:**
 
 1. **COMPANY VISION**
    What is the desired future state of the company? (5+ years)
@@ -525,23 +583,18 @@ Please provide detailed answers based on the summarized data.
     return prompt
 
 
-def get_answers_from_openai(prompt):
-    """
-    Sends the prompt to OpenAI's API and returns the assistant's response.
 
-    Parameters:
-        prompt (str): The prompt to send.
+def get_answers_from_openai(system_prompt, prompt):
 
-    Returns:
-        str: The assistant's response.
-    """
     try:
         response = client.chat.completions.create(model="gpt-4o",
         messages=[
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=16384,
-        temperature=0.3)
+        max_completion_tokens=16000,
+        # temperature=0.4
+        )
         assistant_response = response.choices[0].message.content
         return assistant_response.strip()
     except openai.OpenAIError as e:
@@ -1262,7 +1315,7 @@ def main():
     }
 
     # Step 2: Scrape Client Homepage (with HTML stripping)
-    client_homepage_content = scrape_with_scraperapi(client_website)
+    client_homepage_content = scrape_with_scraperapi(client_website, extra_params=extra_params)
     if client_homepage_content:
         stripped_homepage_content = extract_homepage_content(client_homepage_content)
         save_html_to_file(stripped_homepage_content, data_dir, 'client_stripped_homepage_content.txt')
@@ -1271,6 +1324,7 @@ def main():
         aggregated_data['client']['homepage'] = {
             'url': client_website,
             'type': 'client_homepage',
+            'html': stripped_homepage_content,
             'summary': summary  # Store the summary instead of full content
         }
         # Optionally, save the summary to a file
@@ -1303,6 +1357,7 @@ def main():
                         pages.append({
                             'url': result_url,
                             'type': page_type,
+                            'html': stripped_content,
                             'summary': summary
                         })
                         # Save the summary to a file
@@ -1325,11 +1380,24 @@ def main():
         competitor_homepage_content = scrape_with_scraperapi(competitor_website)
         if competitor_homepage_content:
             stripped_competitor_homepage = extract_homepage_content(competitor_homepage_content)
+            # Save the stripped content
+            competitor_homepage_filename = f"competitor_{idx+1}_homepage_stripped.txt"
+            save_html_to_file(stripped_competitor_homepage, data_dir, competitor_homepage_filename)
+            # Summarize the stripped content
+            competitor_homepage_summary_filename = f"competitor_{idx+1}_homepage_summary.txt"
+            summary = summarize_content_and_save(
+                stripped_competitor_homepage,
+                'homepage',
+                os.path.join(data_dir, competitor_homepage_summary_filename)
+            )
+            # Update aggregated_data with both HTML and summary
             competitor_data['homepage'] = {
                 'url': competitor_website,
                 'type': 'competitor_homepage',
-                'html': stripped_competitor_homepage
+                'html': stripped_competitor_homepage,
+                'summary': summary
             }
+
             # Save the stripped content to a file
             filename = f"competitor_{idx+1}_homepage_stripped.txt"
             save_html_to_file(stripped_competitor_homepage, data_dir, filename)
@@ -1355,18 +1423,26 @@ def main():
                         page_content = scrape_with_scraperapi(result_url)
                         if page_content:
                             stripped_content = extract_homepage_content(page_content)
+                            # Save the stripped content
+                            stripped_filename = f"{base_filename}_{idx2+1}_stripped.txt"
+                            save_html_to_file(stripped_content, data_dir, stripped_filename)
+                            # Summarize the stripped content
+                            summary_filename = f"{base_filename}_{idx2+1}_summary.txt"
+                            summary = summarize_content_and_save(
+                                stripped_content,
+                                page_type,
+                                os.path.join(data_dir, summary_filename)
+                            )
                             pages.append({
                                 'url': result_url,
                                 'type': page_type,
-                                'html': stripped_content
+                                'html': stripped_content,
+                                'summary': summary
                             })
-                            # Save the stripped content to a file
-                            stripped_filename = f"{base_filename}_{idx2+1}_stripped.txt"
-                            save_html_to_file(stripped_content, data_dir, stripped_filename)
                         else:
                             logger.error(f"Failed to scrape page: {result_url}")
-                            print(f"Failed to scrape page: {result_url}")  # Debug print statement
                 competitor_data[page_type] = pages
+
             else:
                 logger.error(f"No results found for query: '{query}'")
                 print(f"No results found for query: '{query}'")  # Debug print statement
@@ -1444,6 +1520,7 @@ def main():
         capterra_logger.warning("Client Capterra review page URL is missing.")
         print("Client Capterra review page URL is missing.")  # Debug print statement
 
+    """
     # Step 8: Scrape LinkedIn Ad Library for client and competitors
     # Create a dedicated directory for LinkedIn Ads
     linkedin_ads_dir = os.path.join(data_dir, 'linkedin_ads')
@@ -1495,6 +1572,7 @@ def main():
             linkedin_ads_logger.warning(f"Competitor {idx} LinkedIn Ad Library ID is missing.")
             print(f"Competitor {idx} LinkedIn Ad Library ID is missing.")  # Debug print statement
     aggregated_data['linkedin_ads']['competitor_ads'] = competitor_ads_all
+    """
 
     # Step 9: Aggregate data and prepare OpenAI prompt
     prompt = prepare_openai_prompt(aggregated_data, payload)
@@ -1503,7 +1581,7 @@ def main():
     save_html_to_file(prompt, data_dir, 'openai_prompt.txt')
 
     # Step 10: Send prompt to OpenAI and process response
-    assistant_response = get_answers_from_openai(prompt)
+    assistant_response = get_answers_from_openai(system_prompt, prompt)
 
     # Save the assistant's response to a file
     save_html_to_file(assistant_response, data_dir, 'openai_response.txt')
